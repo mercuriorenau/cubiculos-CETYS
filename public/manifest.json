@@ -1,0 +1,21 @@
+{
+  "name": "Reserva de Cubículos - Biblioteca",
+  "short_name": "Cubículos",
+  "description": "Sistema de reserva de cubículos de biblioteca",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "maskable any"
+    }
+  ],
+  "categories": ["education", "productivity"],
+  "lang": "es",
+  "dir": "ltr"
+}
