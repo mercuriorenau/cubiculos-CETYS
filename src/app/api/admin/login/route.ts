@@ -9,17 +9,9 @@ export async function POST(request: NextRequest) {
 
     const { username, password } = validatedData
 
-    // Check if admin backdoor is enabled
-    const adminBackdoorEnabled = process.env.ADMIN_BACKDOOR_ENABLED === 'true'
-    const adminUser = process.env.ADMIN_USER
-    const adminPass = process.env.ADMIN_PASS
-
-    if (!adminBackdoorEnabled) {
-      return NextResponse.json(
-        { message: 'Admin backdoor is disabled' },
-        { status: 403 }
-      )
-    }
+    // Usar variables de entorno si están configuradas, sino usar credenciales por defecto
+    const adminUser = process.env.ADMIN_USER || 'admin'
+    const adminPass = process.env.ADMIN_PASS || 'admin'
 
     // Validate credentials
     if (username === adminUser && password === adminPass) {
@@ -39,14 +31,14 @@ export async function POST(request: NextRequest) {
       })
     } else {
       return NextResponse.json(
-        { message: 'Invalid credentials' },
+        { message: 'Credenciales inválidas' },
         { status: 401 }
       )
     }
   } catch (error) {
     console.error('Admin login error:', error)
     return NextResponse.json(
-      { message: 'Invalid request' },
+      { message: 'Error en la solicitud' },
       { status: 400 }
     )
   }

@@ -1,6 +1,19 @@
 import { supabase } from './supabase'
 import { RESERVATION_RULES } from './schemas'
 import { mockRooms, mockReservations } from './mock-data'
+import { 
+  getRooms as getCubiculos, 
+  getReservations as getCubiculosReservations,
+  getAllReservations as getAllCubiculosReservations,
+  getUserReservations as getCubiculosUserReservations,
+  createReservation as createCubiculosReservation,
+  cancelReservation as cancelCubiculosReservation,
+  updateReservation as updateCubiculosReservation,
+  checkReservationConflicts as checkCubiculosConflicts,
+  getRoomById as getCubiculosRoomById,
+  type Reservation as CubiculosReservation,
+  type Room as CubiculosRoom
+} from './cubiculos'
 
 export interface Reservation {
   id: string
@@ -11,6 +24,9 @@ export interface Reservation {
   status: 'active' | 'cancelled' | 'completed'
   created_at: string
   updated_at: string
+  matricula?: string
+  nombreCompleto?: string
+  cantidadPersonas?: number
   room?: {
     id: string
     nombre: string
@@ -36,18 +52,31 @@ export interface Blackout {
   activo: boolean
 }
 
-export async function getRooms(): Promise<Room[]> {
-  const { data, error } = await supabase
-    .from('rooms')
-    .select('*')
-    .eq('activo', true)
-    .order('nombre')
+export function getRooms(): Room[] {
+  // Usar el sistema de cubículos hardcodeados
+  const cubiculos = getCubiculos()
+  
+  // Convertir CubiculosRoom a Room para mantener compatibilidad
+  return cubiculos.map(room => ({
+    id: room.id,
+    nombre: room.nombre,
+    descripcion: room.descripcion,
+    capacidad: room.capacidad,
+    activo: room.activo
+  }))
+}
 
-  if (error) {
-    throw new Error(error.message)
+export function getRoomById(roomId: string): Room | null {
+  const cubiculo = getCubiculosRoomById(roomId)
+  if (!cubiculo) return null
+  
+  return {
+    id: cubiculo.id,
+    nombre: cubiculo.nombre,
+    descripcion: cubiculo.descripcion,
+    capacidad: cubiculo.capacidad,
+    activo: cubiculo.activo
   }
-
-  return data || []
 }
 
 export async function getBlackouts(startDate: Date, endDate: Date): Promise<Blackout[]> {
@@ -70,53 +99,76 @@ export async function getReservations(
   startDate?: Date,
   endDate?: Date
 ): Promise<Reservation[]> {
-  let query = supabase
-    .from('reservations')
-    .select(`
-      *,
-      room:rooms(*)
-    `)
-    .eq('status', 'active')
-
+  // Usar el sistema de cubículos con localStorage
+  const cubiculosReservations = getCubiculosReservations()
+  
+  let filteredReservations = cubiculosReservations.filter(r => r.status === 'active')
+  
+  // Filtrar por roomId si se proporciona
   if (roomId) {
-    query = query.eq('room_id', roomId)
+    filteredReservations = filteredReservations.filter(r => r.room_id === roomId)
   }
-
+  
+  // Filtrar por fechas si se proporcionan
   if (startDate) {
-    query = query.gte('inicio', startDate.toISOString())
+    filteredReservations = filteredReservations.filter(r => new Date(r.inicio) >= startDate)
   }
-
+  
   if (endDate) {
-    query = query.lte('fin', endDate.toISOString())
+    filteredReservations = filteredReservations.filter(r => new Date(r.fin) <= endDate)
   }
-
-  const { data, error } = await query.order('inicio')
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return data || []
+  
+  // Convertir CubiculosReservation a Reservation para mantener compatibilidad
+  return filteredReservations.map(reservation => ({
+    id: reservation.id,
+    user_id: '',
+    room_id: reservation.room_id,
+    inicio: reservation.inicio,
+    fin: reservation.fin,
+    status: reservation.status as 'active' | 'cancelled' | 'completed',
+    created_at: reservation.created_at,
+    updated_at: reservation.created_at,
+    matricula: reservation.matricula,
+    nombreCompleto: reservation.nombreCompleto,
+    cantidadPersonas: reservation.cantidadPersonas,
+    room: {
+      id: reservation.room_id,
+      nombre: getCubiculos().find(r => r.id === reservation.room_id)?.nombre || 'Cubículo',
+      capacidad: getCubiculos().find(r => r.id === reservation.room_id)?.capacidad || 1
+    }
+  }))
 }
 
 export async function getUserReservations(): Promise<Reservation[]> {
-  const { data, error } = await supabase
-    .from('reservations')
-    .select(`
-      *,
-      room:rooms(*)
-    `)
-    .order('inicio', { ascending: false })
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return data || []
+  // Usar el sistema de cubículos con localStorage
+  const cubiculosReservations = getCubiculosUserReservations()
+  
+  // Convertir CubiculosReservation a Reservation para mantener compatibilidad
+  return cubiculosReservations.map(reservation => ({
+    id: reservation.id,
+    user_id: '', // No necesario en el sistema simplificado
+    room_id: reservation.room_id,
+    inicio: reservation.inicio,
+    fin: reservation.fin,
+    status: reservation.status as 'active' | 'cancelled' | 'completed',
+    created_at: reservation.created_at,
+    updated_at: reservation.created_at,
+    matricula: reservation.matricula,
+    nombreCompleto: reservation.nombreCompleto,
+    cantidadPersonas: reservation.cantidadPersonas,
+    room: {
+      id: reservation.room_id,
+      nombre: getCubiculos().find(r => r.id === reservation.room_id)?.nombre || 'Cubículo',
+      capacidad: getCubiculos().find(r => r.id === reservation.room_id)?.capacidad || 1
+    }
+  }))
 }
 
 export async function createReservation(
   roomId: string,
+  matricula: string,
+  nombreCompleto: string,
+  cantidadPersonas: number,
   inicio: string,
   fin: string
 ): Promise<Reservation> {
@@ -127,51 +179,84 @@ export async function createReservation(
   }
 
   // Check for conflicts
-  const conflicts = await checkReservationConflicts(roomId, inicio, fin)
+  const conflicts = checkCubiculosConflicts(roomId, inicio, fin)
   if (conflicts.length > 0) {
     throw new Error('Ya existe una reserva en ese horario')
   }
 
-  // Check blackouts
-  const startDate = new Date(inicio)
-  const endDate = new Date(fin)
-  const blackouts = await getBlackouts(startDate, endDate)
-  if (blackouts.length > 0) {
-    throw new Error('No se pueden hacer reservas durante cierres de biblioteca')
+  // Crear reserva usando el sistema de cubículos
+  const cubiculosReservation = createCubiculosReservation(
+    roomId,
+    matricula,
+    nombreCompleto,
+    cantidadPersonas,
+    inicio,
+    fin
+  )
+
+  // Convertir a formato Reservation para mantener compatibilidad
+  const room = getCubiculos().find(r => r.id === roomId)
+  return {
+    id: cubiculosReservation.id,
+    user_id: '',
+    room_id: cubiculosReservation.room_id,
+    inicio: cubiculosReservation.inicio,
+    fin: cubiculosReservation.fin,
+    status: cubiculosReservation.status as 'active' | 'cancelled' | 'completed',
+    created_at: cubiculosReservation.created_at,
+    updated_at: cubiculosReservation.created_at,
+    matricula: cubiculosReservation.matricula,
+    nombreCompleto: cubiculosReservation.nombreCompleto,
+    cantidadPersonas: cubiculosReservation.cantidadPersonas,
+    room: {
+      id: room?.id || roomId,
+      nombre: room?.nombre || 'Cubículo',
+      capacidad: room?.capacidad || 1
+    }
   }
-
-  const { data, error } = await supabase
-    .from('reservations')
-    .insert({
-      room_id: roomId,
-      inicio,
-      fin,
-      status: 'active'
-    })
-    .select(`
-      *,
-      room:rooms(*)
-    `)
-    .single()
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return data
 }
 
 export async function cancelReservation(reservationId: string): Promise<void> {
-  const { error } = await supabase
-    .from('reservations')
-    .update({ 
-      status: 'cancelled',
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', reservationId)
+  // Usar el sistema de cubículos
+  cancelCubiculosReservation(reservationId)
+}
 
-  if (error) {
-    throw new Error(error.message)
+export async function updateReservation(
+  reservationId: string,
+  updates: Partial<{
+    room_id: string
+    matricula: string
+    nombreCompleto: string
+    cantidadPersonas: number
+    inicio: string
+    fin: string
+    status: 'active' | 'cancelled' | 'completed'
+  }>
+): Promise<Reservation | null> {
+  // Usar el sistema de cubículos
+  const updated = updateCubiculosReservation(reservationId, updates)
+  
+  if (!updated) return null
+  
+  // Convertir a formato Reservation para mantener compatibilidad
+  const room = getCubiculos().find(r => r.id === updated.room_id)
+  return {
+    id: updated.id,
+    user_id: '',
+    room_id: updated.room_id,
+    inicio: updated.inicio,
+    fin: updated.fin,
+    status: updated.status as 'active' | 'cancelled' | 'completed',
+    created_at: updated.created_at,
+    updated_at: updated.created_at,
+    matricula: updated.matricula,
+    nombreCompleto: updated.nombreCompleto,
+    cantidadPersonas: updated.cantidadPersonas,
+    room: {
+      id: room?.id || updated.room_id,
+      nombre: room?.nombre || 'Cubículo',
+      capacidad: room?.capacidad || 1
+    }
   }
 }
 
@@ -180,18 +265,28 @@ export async function checkReservationConflicts(
   inicio: string,
   fin: string
 ): Promise<Reservation[]> {
-  const { data, error } = await supabase
-    .from('reservations')
-    .select('*')
-    .eq('room_id', roomId)
-    .eq('status', 'active')
-    .or(`and(inicio.lt.${fin},fin.gt.${inicio})`)
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return data || []
+  // Usar el sistema de cubículos
+  const cubiculosConflicts = checkCubiculosConflicts(roomId, inicio, fin)
+  
+  // Convertir a formato Reservation para mantener compatibilidad
+  return cubiculosConflicts.map(reservation => ({
+    id: reservation.id,
+    user_id: '',
+    room_id: reservation.room_id,
+    inicio: reservation.inicio,
+    fin: reservation.fin,
+    status: reservation.status as 'active' | 'cancelled' | 'completed',
+    created_at: reservation.created_at,
+    updated_at: reservation.created_at,
+    matricula: reservation.matricula,
+    nombreCompleto: reservation.nombreCompleto,
+    cantidadPersonas: reservation.cantidadPersonas,
+    room: {
+      id: reservation.room_id,
+      nombre: getCubiculos().find(r => r.id === reservation.room_id)?.nombre || 'Cubículo',
+      capacidad: getCubiculos().find(r => r.id === reservation.room_id)?.capacidad || 1
+    }
+  }))
 }
 
 export function validateReservationRules(inicio: string, fin: string): { valid: boolean; message?: string } {

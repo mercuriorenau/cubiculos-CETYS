@@ -1,70 +1,24 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Verificar si Supabase está configurado correctamente
-const isSupabaseConfigured = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  return url && key && 
-         url !== 'your_supabase_project_url' && 
-         url !== 'https://placeholder.supabase.co' &&
-         url.startsWith('https://') &&
-         key.startsWith('eyJ')
-}
+// Configuración de Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://zmkhzqxqbolcobmmfhqb.supabase.co'
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpta2h6cXhxYm9sY29ibW1maHFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkwNzc2MDAsImV4cCI6MjA3NDY1MzYwMH0.R8lZUAMWz-6pF9fqBEvTIThRqjqliQmeN7LDTYdEQco'
 
-// Solo inicializar Supabase si está configurado correctamente
-let supabase: any = null
-let supabaseAdmin: any = null
+console.log('✅ Configuración de Supabase cargada')
+console.log('🔗 URL:', supabaseUrl)
+console.log('🔑 Key:', supabaseAnonKey.substring(0, 30) + '...')
 
-if (isSupabaseConfigured()) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  
-  supabase = createClient(supabaseUrl, supabaseAnonKey)
-  
-  supabaseAdmin = createClient(
-    supabaseUrl,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    }
-  )
-} else {
-  console.warn('⚠️ Supabase no está configurado correctamente. Por favor, configura las variables de entorno en .env')
-  
-  // Crear clientes mock que muestren errores informativos
-  supabase = {
+// Crear cliente de Supabase
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// Crear cliente admin (opcional, para operaciones administrativas)
+export const supabaseAdmin = createClient(
+  supabaseUrl,
+  'dummy-service-key', // No necesario para operaciones básicas
+  {
     auth: {
-      getUser: () => Promise.resolve({ data: { user: null }, error: { message: 'Supabase no configurado' } }),
-      signInWithPassword: () => Promise.resolve({ data: null, error: { message: 'Supabase no configurado' } }),
-      signUp: () => Promise.resolve({ data: null, error: { message: 'Supabase no configurado' } }),
-      signOut: () => Promise.resolve({ error: { message: 'Supabase no configurado' } })
-    },
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          single: () => Promise.resolve({ data: null, error: { message: 'Supabase no configurado' } })
-        }),
-        order: () => Promise.resolve({ data: [], error: { message: 'Supabase no configurado' } })
-      }),
-      insert: () => ({
-        select: () => ({
-          single: () => Promise.resolve({ data: null, error: { message: 'Supabase no configurado' } })
-        })
-      }),
-      update: () => ({
-        eq: () => ({
-          select: () => ({
-            single: () => Promise.resolve({ data: null, error: { message: 'Supabase no configurado' } })
-          })
-        })
-      })
-    })
+      autoRefreshToken: false,
+      persistSession: false
+    }
   }
-  
-  supabaseAdmin = supabase
-}
-
-export { supabase, supabaseAdmin }
+)

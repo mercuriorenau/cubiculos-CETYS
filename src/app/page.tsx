@@ -71,10 +71,9 @@ export default function StudentView() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [roomsData, reservationsData] = await Promise.all([
-          getRooms(),
-          getUserReservations()
-        ])
+        // Obtener cubículos (síncrono) y reservas (asíncrono)
+        const roomsData = getRooms()
+        const reservationsData = await getUserReservations()
 
         setRooms(roomsData)
         setReservations(reservationsData.filter(r => r.status === 'active'))
@@ -175,6 +174,7 @@ export default function StudentView() {
                   src="/cetys-logo.jpg"
                   alt="CETYS Universidad"
                   fill
+                  sizes="64px"
                   className="object-contain"
                 />
               </div>

@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { getRooms, getReservations, createReservation, checkReservationConflicts } from '@/lib/reservations'
+import { getRooms, getReservations, createReservation, checkReservationConflicts, getRoomById } from '@/lib/reservations'
 import { Room, Reservation } from '@/lib/reservations'
 import { ArrowLeft, MapPin, Users, Calendar, Clock, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -34,7 +34,6 @@ const isSunday = () => {
 
 const reservationSchema = z.object({
   matricula: z.string().min(1, 'La matrícula es requerida').max(20, 'Matrícula muy larga'),
-  nombreCompleto: z.string().min(1, 'El nombre completo es requerido').max(100, 'Nombre muy largo'),
   cantidadPersonas: z.number().int().min(1, 'Mínimo 1 persona').max(10, 'Máximo 10 personas'),
   horaInicio: z.string().min(1, 'Hora de inicio requerida'),
   horaFin: z.string().min(1, 'Hora de fin requerida'),
@@ -72,6 +71,16 @@ const reservationSchema = z.object({
 }, {
   message: "La hora de fin debe estar entre 7:00 AM y 9:00 PM",
   path: ["horaFin"]
+}).refine((data) => {
+  // Verificar que la reserva no exceda 2 horas
+  const inicio = new Date(`2000-01-01T${data.horaInicio}`)
+  const fin = new Date(`2000-01-01T${data.horaFin}`)
+  const duracionHoras = (fin.getTime() - inicio.getTime()) / (1000 * 60 * 60)
+  
+  return duracionHoras <= 2
+}, {
+  message: "La reserva no puede exceder 2 horas",
+  path: ["horaFin"]
 })
 
 type ReservationForm = z.infer<typeof reservationSchema>
@@ -98,13 +107,17 @@ export default function RoomDetailPage() {
   useEffect(() => {
     const loadRoomData = async () => {
       try {
-        const [roomsData, reservationsData] = await Promise.all([
-          getRooms(),
-          getReservations(roomId)
-        ])
+        console.log('🔍 Buscando cubículo con ID:', roomId)
+        
+        // Obtener cubículo por ID (síncrono) y reservas (asíncrono)
+        const roomData = getRoomById(roomId)
+        console.log('📦 Datos del cubículo encontrados:', roomData)
+        
+        const reservationsData = await getReservations(roomId)
+        console.log('📅 Reservas encontradas:', reservationsData)
 
-        const roomData = roomsData.find(r => r.id === roomId)
         if (!roomData) {
+          console.error('❌ Cubículo no encontrado para ID:', roomId)
           toast.error('Cubículo no encontrado')
           router.push('/')
           return
@@ -112,7 +125,9 @@ export default function RoomDetailPage() {
 
         setRoom(roomData)
         setReservations(reservationsData)
+        console.log('✅ Datos cargados correctamente')
       } catch (error) {
+        console.error('❌ Error al cargar datos:', error)
         toast.error('Error al cargar los datos del cubículo')
       } finally {
         setIsLoading(false)
@@ -133,10 +148,11 @@ export default function RoomDetailPage() {
         return
       }
 
-      // Validar matrícula contra whitelist (simulado)
-      const matriculaValida = await validateMatricula(data.matricula)
-      if (!matriculaValida) {
-        toast.error('Matrícula no válida o no autorizada')
+      // Validar matrícula contra la base de datos
+      const matriculaValidation = await validateMatricula(data.matricula)
+      if (!matriculaValidation.valid) {
+        // Mostrar el mensaje específico que viene de la validación
+        toast.error(matriculaValidation.message || 'Matrícula no válida o no autorizada')
         return
       }
 
@@ -164,21 +180,17 @@ export default function RoomDetailPage() {
         return
       }
 
-      // Crear reserva (simulado)
-      const nuevaReserva = {
-        id: Date.now().toString(),
-        room_id: roomId,
-        matricula: data.matricula,
-        nombreCompleto: data.nombreCompleto,
-        cantidadPersonas: data.cantidadPersonas,
-        inicio: inicio.toISOString(),
-        fin: fin.toISOString(),
-        status: 'active' as const,
-        created_at: new Date().toISOString(),
-        room: room
-      }
+      // Crear reserva usando el sistema simplificado
+      const nuevaReserva = await createReservation(
+        roomId,
+        data.matricula,
+        '', // No necesitamos nombre completo
+        data.cantidadPersonas,
+        inicio.toISOString(),
+        fin.toISOString()
+      )
 
-      // Simular creación exitosa
+      // Crear reserva exitosa
       toast.success('Reserva creada exitosamente')
       setIsDialogOpen(false)
       reset()
@@ -192,11 +204,16 @@ export default function RoomDetailPage() {
     }
   }
 
-  // Función simulada para validar matrícula
-  const validateMatricula = async (matricula: string): Promise<boolean> => {
-    // Simular validación contra whitelist
-    const matriculasValidas = ['2024001234', '2024001235', '2024001236', '2024001237', '2024001238']
-    return matriculasValidas.includes(matricula.trim().toUpperCase())
+  // Función para validar matrícula usando el sistema real
+  const validateMatricula = async (matricula: string): Promise<{ valid: boolean; message?: string }> => {
+    try {
+      const { verifyMatricula } = await import('@/lib/auth')
+      const result = await verifyMatricula(matricula)
+      return result
+    } catch (error) {
+      console.error('Error validando matrícula:', error)
+      return { valid: false, message: 'Error al validar la matrícula. Por favor, intenta de nuevo.' }
+    }
   }
 
   const formatDate = (dateString: string) => {
@@ -366,20 +383,7 @@ export default function RoomDetailPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="nombreCompleto">Nombre Completo</Label>
-                        <Input
-                          id="nombreCompleto"
-                          placeholder="Ej: Juan Pérez García"
-                          {...register('nombreCompleto')}
-                          disabled={isCreating}
-                        />
-                        {errors.nombreCompleto && (
-                          <p className="text-sm text-red-600">{errors.nombreCompleto.message}</p>
-                        )}
-                      </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="cantidadPersonas">Cantidad de Personas</Label>
+                        <Label htmlFor="cantidadPersonas">Cantidad de Personas</Label>
                             <Input
                               id="cantidadPersonas"
                               type="number"
