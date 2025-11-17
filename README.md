@@ -59,30 +59,11 @@ cd cubiculos
 npm install
 ```
 
-### 3. Configurar variables de entorno
+### 3. Variables de entorno
 
-Copia el archivo de ejemplo y configura las variables:
+El archivo `.env` ya está incluido en el repositorio con las credenciales de Supabase configuradas. No necesitas configurar nada adicional.
 
-```bash
-cp env.example .env.local
-```
-
-Edita `.env.local` con tus valores:
-
-```env
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-
-# Admin Backdoor (Development Only)
-ADMIN_BACKDOOR_ENABLED=true
-ADMIN_USER=admin
-ADMIN_PASS=admin
-
-# App Configuration
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-```
+**Nota**: Las credenciales están en el repositorio porque es un proyecto privado. Si necesitas cambiarlas, edita el archivo `.env`.
 
 ### 4. Configurar Supabase
 
