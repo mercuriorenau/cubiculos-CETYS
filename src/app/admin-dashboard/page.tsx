@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getRooms, getReservations, createReservation, updateReservation, cancelReservation, checkReservationConflicts } from '@/lib/reservations'
 import { Room, Reservation } from '@/lib/reservations'
-import { Calendar, Clock, MapPin, LogOut, Plus, Edit, Trash2, X, FileText } from 'lucide-react'
+import { Calendar, Clock, MapPin, LogOut, Plus, Edit, Trash2, X, FileText, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { CETYS_CLASSES } from '@/lib/cetys-colors'
 import Image from 'next/image'
@@ -291,14 +291,24 @@ export default function AdminDashboard() {
                 </p>
               </div>
             </div>
-            <Button 
-              variant="outline" 
-              onClick={handleSignOut}
-              className="border-gray-300 text-gray-700 hover:bg-gray-50 px-6 py-2"
-            >
-              <LogOut className="h-4 w-4 mr-2" />
-              Cerrar Sesión
-            </Button>
+            <div className="flex items-center space-x-3">
+              <Button 
+                variant="outline" 
+                onClick={() => router.push('/admin-whitelist')}
+                className="border-[#FFCD00] text-black hover:bg-[#FFCD00] px-6 py-2"
+              >
+                <Users className="h-4 w-4 mr-2" />
+                Gestión de Estudiantes
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={handleSignOut}
+                className="border-gray-300 text-gray-700 hover:bg-gray-50 px-6 py-2"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Cerrar Sesión
+              </Button>
+            </div>
           </div>
         </div>
       </header>
