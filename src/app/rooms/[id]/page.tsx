@@ -32,9 +32,9 @@ const isSunday = () => {
   return hoy.getDay() === 0 // 0 = domingo
 }
 
-const reservationSchema = z.object({
+// Función para crear el esquema de validación
+const createReservationSchema = () => z.object({
   matricula: z.string().min(1, 'La matrícula es requerida').max(20, 'Matrícula muy larga'),
-  cantidadPersonas: z.number().int().min(1, 'Mínimo 1 persona').max(10, 'Máximo 10 personas'),
   horaInicio: z.string().min(1, 'Hora de inicio requerida'),
   horaFin: z.string().min(1, 'Hora de fin requerida'),
 }).refine((data) => {
@@ -76,14 +76,21 @@ const reservationSchema = z.object({
   const inicio = new Date(`2000-01-01T${data.horaInicio}`)
   const fin = new Date(`2000-01-01T${data.horaFin}`)
   const duracionHoras = (fin.getTime() - inicio.getTime()) / (1000 * 60 * 60)
+  const duracionMinutos = (fin.getTime() - inicio.getTime()) / (1000 * 60)
   
+  // Validar duración mínima de 30 minutos
+  if (duracionMinutos < 30) {
+    return false
+  }
+  
+  // Validar duración máxima de 2 horas (120 minutos)
   return duracionHoras <= 2
 }, {
-  message: "La reserva no puede exceder 2 horas",
+  message: "La reserva debe ser entre 30 minutos y 2 horas máximo",
   path: ["horaFin"]
 })
 
-type ReservationForm = z.infer<typeof reservationSchema>
+type ReservationForm = z.infer<ReturnType<typeof createReservationSchema>>
 
 export default function RoomDetailPage() {
   const [room, setRoom] = useState<Room | null>(null)
@@ -91,6 +98,7 @@ export default function RoomDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [selectedBlocks, setSelectedBlocks] = useState<number[]>([]) // Índices de bloques seleccionados
   const router = useRouter()
   const params = useParams()
   const roomId = params.id as string
@@ -100,9 +108,14 @@ export default function RoomDetailPage() {
     handleSubmit,
     formState: { errors },
     reset,
+    watch,
+    setValue,
   } = useForm<ReservationForm>({
-    resolver: zodResolver(reservationSchema),
+    resolver: zodResolver(createReservationSchema()),
   })
+
+  // Campos ocultos para mantener compatibilidad con el formulario
+  // Los valores se actualizan automáticamente cuando se seleccionan bloques
 
   useEffect(() => {
     const loadRoomData = async () => {
@@ -112,6 +125,10 @@ export default function RoomDetailPage() {
         // Obtener cubículo por ID (síncrono) y reservas (asíncrono)
         const roomData = getRoomById(roomId)
         console.log('📦 Datos del cubículo encontrados:', roomData)
+        
+        // Actualizar estados antes de obtener las reservas
+        const { updateReservationStatuses } = await import('@/lib/cubiculos')
+        updateReservationStatuses()
         
         const reservationsData = await getReservations(roomId)
         console.log('📅 Reservas encontradas:', reservationsData)
@@ -137,14 +154,31 @@ export default function RoomDetailPage() {
     if (roomId) {
       loadRoomData()
     }
+    
+    // Actualizar estados de reservas cada minuto
+    const interval = setInterval(() => {
+      if (roomId) {
+        loadRoomData()
+      }
+    }, 60000) // 60 segundos
+    
+    return () => clearInterval(interval)
   }, [roomId, router])
 
   const onSubmit = async (data: ReservationForm) => {
     setIsCreating(true)
     try {
+      // Verificar que se hayan seleccionado bloques
+      if (selectedBlocks.length === 0) {
+        toast.error('Por favor selecciona al menos un bloque horario')
+        setIsCreating(false)
+        return
+      }
+
       // Verificar si es domingo
       if (isSunday()) {
         toast.error('La biblioteca está cerrada los domingos')
+        setIsCreating(false)
         return
       }
 
@@ -153,12 +187,7 @@ export default function RoomDetailPage() {
       if (!matriculaValidation.valid) {
         // Mostrar el mensaje específico que viene de la validación
         toast.error(matriculaValidation.message || 'Matrícula no válida o no autorizada')
-        return
-      }
-
-      // Verificar capacidad del cubículo
-      if (data.cantidadPersonas > (room?.capacidad || 1)) {
-        toast.error(`Este cubículo solo tiene capacidad para ${room?.capacidad} persona${room?.capacidad > 1 ? 's' : ''}`)
+        setIsCreating(false)
         return
       }
 
@@ -173,19 +202,20 @@ export default function RoomDetailPage() {
       const fin = new Date(hoy)
       fin.setHours(horaFin, minutoFin, 0, 0)
 
-      // Check for conflicts
-      const conflicts = await checkReservationConflicts(roomId, inicio.toISOString(), fin.toISOString())
-      if (conflicts.length > 0) {
-        toast.error('Ya existe una reserva en ese horario')
+      // Validar que las horas estén definidas
+      if (!data.horaInicio || !data.horaFin) {
+        toast.error('Por favor selecciona un horario válido')
+        setIsCreating(false)
         return
       }
 
       // Crear reserva usando el sistema simplificado
+      // La función createReservation ya valida conflictos de cubículo y matrícula
       const nuevaReserva = await createReservation(
         roomId,
         data.matricula,
         '', // No necesitamos nombre completo
-        data.cantidadPersonas,
+        1, // Cantidad de personas por defecto (ya no se usa pero se mantiene para compatibilidad)
         inicio.toISOString(),
         fin.toISOString()
       )
@@ -193,12 +223,19 @@ export default function RoomDetailPage() {
       // Crear reserva exitosa
       toast.success('Reserva creada exitosamente')
       setIsDialogOpen(false)
+      setSelectedBlocks([])
       reset()
       
-      // Actualizar lista de reservas
-      setReservations([...reservations, nuevaReserva])
-    } catch (error) {
-      toast.error('Error al crear la reserva')
+      // Actualizar lista de reservas inmediatamente
+      // Primero actualizar estados y luego obtener las reservas actualizadas
+      const { updateReservationStatuses } = await import('@/lib/cubiculos')
+      updateReservationStatuses()
+      const updatedReservations = await getReservations(roomId)
+      setReservations(updatedReservations)
+    } catch (error: any) {
+      // Mostrar el mensaje de error específico
+      const errorMessage = error?.message || 'Error al crear la reserva'
+      toast.error(errorMessage)
     } finally {
       setIsCreating(false)
     }
@@ -225,40 +262,146 @@ export default function RoomDetailPage() {
     })
   }
 
-  const getNextAvailableSlot = () => {
-    const hoy = new Date()
-    
-    // Verificar si es domingo
-    if (isSunday()) {
-      // Si es domingo, sugerir horario para el lunes
-      return {
-        horaInicio: "07:00",
-        horaFin: "08:00"
-      }
+  // Generar bloques horarios de 1 hora (7:00 AM a 9:00 PM)
+  const generateTimeBlocks = () => {
+    const blocks: { hora: string; index: number }[] = []
+    for (let hora = 7; hora < 21; hora++) {
+      blocks.push({
+        hora: `${hora.toString().padStart(2, '0')}:00`,
+        index: hora - 7
+      })
     }
-    
-    // Horario de la biblioteca: 7:00 AM - 9:00 PM
-    const horaActual = hoy.getHours()
-    let horaInicio = Math.max(horaActual + 1, 7) // Mínimo 1 hora después de ahora, mínimo 7 AM
-    let horaFin = horaInicio + 1 // Duración de 1 hora por defecto
-    
-    // Si ya es muy tarde, usar horario de mañana
-    if (horaActual >= 20) {
-      horaInicio = 7
-      horaFin = 8
-    }
-    
-    // Asegurar que no exceda el horario de cierre
-    if (horaFin > 21) {
-      horaFin = 21
-      horaInicio = horaFin - 1
-    }
-
-    return {
-      horaInicio: `${horaInicio.toString().padStart(2, '0')}:00`,
-      horaFin: `${horaFin.toString().padStart(2, '0')}:00`
-    }
+    return blocks
   }
+
+  // Verificar si un bloque está disponible
+  const isBlockAvailable = (blockIndex: number): boolean => {
+    if (isSunday()) return false
+    
+    const hoy = new Date()
+    const horaActual = hoy.getHours()
+    const minutoActual = hoy.getMinutes()
+    const horaBloque = blockIndex + 7
+    
+    // Permitir reservar en el bloque actual si aún no ha pasado completamente
+    // Si la hora del bloque es igual a la hora actual, permitir reservar
+    // Si la hora del bloque es menor, no permitir (ya pasó)
+    if (horaBloque < horaActual) return false
+    // Si es la misma hora, permitir (aún se puede reservar para ese bloque)
+    
+    // Verificar conflictos con reservas existentes
+    const horaInicio = `${horaBloque.toString().padStart(2, '0')}:00`
+    const horaFin = `${(horaBloque + 1).toString().padStart(2, '0')}:00`
+    
+    const hoyISO = hoy.toISOString().split('T')[0]
+    const inicioISO = `${hoyISO}T${horaInicio}:00`
+    const finISO = `${hoyISO}T${horaFin}:00`
+    
+    // Verificar si hay reservas que se solapen con este bloque
+    // Considerar reservas activas y futuras (no canceladas ni completadas que ya pasaron)
+    const hasConflict = reservations.some(reservation => {
+      // No considerar reservas canceladas
+      if (reservation.status === 'cancelled') return false
+      
+      const resInicio = new Date(reservation.inicio)
+      const resFin = new Date(reservation.fin)
+      const blockInicio = new Date(inicioISO)
+      const blockFin = new Date(finISO)
+      
+      // Considerar reservas activas y futuras
+      const isActive = reservation.status === 'active'
+      const isFuture = resInicio > hoy
+      
+      // Solo considerar reservas activas o futuras
+      if (!isActive && !isFuture) return false
+      
+      // Verificar solapamiento: dos intervalos se solapan si start1 < end2 && end1 > start2
+      return (blockInicio < resFin && blockFin > resInicio)
+    })
+    
+    return !hasConflict
+  }
+
+  // Verificar si un bloque puede ser seleccionado
+  const canSelectBlock = (blockIndex: number): boolean => {
+    if (!isBlockAvailable(blockIndex)) return false
+    if (selectedBlocks.includes(blockIndex)) return true // Puede deseleccionarse
+    
+    if (selectedBlocks.length === 0) return true
+    if (selectedBlocks.length === 1) {
+      // Puede seleccionarse si es consecutivo al bloque seleccionado
+      return Math.abs(blockIndex - selectedBlocks[0]) === 1
+    }
+    // Si ya hay 2 bloques, solo puede seleccionarse si es uno de los ya seleccionados
+    return selectedBlocks.includes(blockIndex)
+  }
+
+  // Manejar selección de bloques
+  const handleBlockClick = (blockIndex: number) => {
+    if (!isBlockAvailable(blockIndex)) return
+    
+    setSelectedBlocks(prev => {
+      // Si el bloque ya está seleccionado, deseleccionarlo
+      if (prev.includes(blockIndex)) {
+        const newSelection = prev.filter(idx => idx !== blockIndex)
+        updateTimesFromBlocks(newSelection)
+        return newSelection
+      }
+      
+      // Si ya hay 2 bloques seleccionados, reemplazar con el nuevo
+      if (prev.length >= 2) {
+        const newSelection = [blockIndex]
+        updateTimesFromBlocks(newSelection)
+        return newSelection
+      }
+      
+      // Si hay 1 bloque seleccionado, verificar que sea consecutivo
+      if (prev.length === 1) {
+        const firstBlock = prev[0]
+        // Verificar si son consecutivos
+        if (Math.abs(blockIndex - firstBlock) === 1) {
+          const newSelection = [Math.min(firstBlock, blockIndex), Math.max(firstBlock, blockIndex)]
+          updateTimesFromBlocks(newSelection)
+          return newSelection
+        } else {
+          // Si no son consecutivos, reemplazar
+          const newSelection = [blockIndex]
+          updateTimesFromBlocks(newSelection)
+          return newSelection
+        }
+      }
+      
+      // Si no hay bloques seleccionados, seleccionar este
+      const newSelection = [blockIndex]
+      updateTimesFromBlocks(newSelection)
+      return newSelection
+    })
+  }
+
+  // Actualizar campos de hora basado en bloques seleccionados
+  const updateTimesFromBlocks = (blocks: number[]) => {
+    if (blocks.length === 0) {
+      setValue('horaInicio', '')
+      setValue('horaFin', '')
+      return
+    }
+    
+    const sortedBlocks = [...blocks].sort((a, b) => a - b)
+    const horaInicio = `${(sortedBlocks[0] + 7).toString().padStart(2, '0')}:00`
+    const horaFin = `${(sortedBlocks[sortedBlocks.length - 1] + 8).toString().padStart(2, '0')}:00`
+    
+    setValue('horaInicio', horaInicio, { shouldValidate: true })
+    setValue('horaFin', horaFin, { shouldValidate: true })
+  }
+
+  // Limpiar selección cuando se abre/cierra el diálogo
+  useEffect(() => {
+    if (isDialogOpen) {
+      setSelectedBlocks([])
+      setValue('horaInicio', '')
+      setValue('horaFin', '')
+    }
+  }, [isDialogOpen, setValue])
 
   if (isLoading) {
     return (
@@ -289,8 +432,6 @@ export default function RoomDetailPage() {
       </div>
     )
   }
-
-  const nextSlot = getNextAvailableSlot()
 
   return (
     <div className="min-h-screen bg-white">
@@ -368,6 +509,10 @@ export default function RoomDetailPage() {
                       </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                      {/* Campos ocultos para mantener compatibilidad con el formulario */}
+                      <input type="hidden" {...register('horaInicio')} />
+                      <input type="hidden" {...register('horaFin')} />
+                      
                       <div className="space-y-2">
                         <Label htmlFor="matricula">Matrícula</Label>
                         <Input
@@ -383,52 +528,107 @@ export default function RoomDetailPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="cantidadPersonas">Cantidad de Personas</Label>
-                            <Input
-                              id="cantidadPersonas"
-                              type="number"
-                              min="1"
-                              max={room.capacidad}
-                              placeholder="1"
-                              {...register('cantidadPersonas', { valueAsNumber: true })}
-                              disabled={isCreating}
-                            />
-                            {errors.cantidadPersonas && (
-                              <p className="text-sm text-red-600">{errors.cantidadPersonas.message}</p>
-                            )}
-                            <p className="text-xs text-gray-500">
-                              Máximo {room.capacidad} persona{room.capacidad > 1 ? 's' : ''}
+                        <Label>Selecciona tu horario (máximo 2 horas consecutivas)</Label>
+                        {(() => {
+                          // Verificar si el cubículo está ocupado actualmente
+                          const now = new Date()
+                          const currentReservation = reservations.find(r => {
+                            const inicio = new Date(r.inicio)
+                            const fin = new Date(r.fin)
+                            return now >= inicio && now <= fin
+                          })
+                          
+                          if (currentReservation) {
+                            const finReserva = new Date(currentReservation.fin)
+                            const horaFin = finReserva.getHours()
+                            const minutoFin = finReserva.getMinutes()
+                            const horaFormateada = horaFin === 12
+                              ? `12:${minutoFin.toString().padStart(2, '0')} PM`
+                              : horaFin > 12
+                                ? `${horaFin - 12}:${minutoFin.toString().padStart(2, '0')} PM`
+                                : `${horaFin}:${minutoFin.toString().padStart(2, '0')} AM`
+                            
+                            return (
+                              <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                <p className="text-sm text-yellow-800">
+                                  <strong>⚠️ Cubículo ocupado actualmente</strong>
+                                  <br />
+                                  El cubículo estará disponible a partir de las <strong>{horaFormateada}</strong>. 
+                                  Puedes seleccionar bloques horarios después de esa hora.
+                                </p>
+                              </div>
+                            )
+                          }
+                          return null
+                        })()}
+                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                          {generateTimeBlocks().map((block) => {
+                            const isAvailable = isBlockAvailable(block.index)
+                            const isSelected = selectedBlocks.includes(block.index)
+                            const canSelect = canSelectBlock(block.index)
+                            
+                            // Formatear hora para mostrar (AM/PM)
+                            const horaNum = block.index + 7
+                            const horaFormateada = horaNum === 12 
+                              ? '12:00 PM' 
+                              : horaNum > 12 
+                                ? `${horaNum - 12}:00 PM`
+                                : `${horaNum}:00 AM`
+                            
+                            return (
+                              <button
+                                key={block.index}
+                                type="button"
+                                onClick={() => handleBlockClick(block.index)}
+                                disabled={!canSelect || isCreating}
+                                className={`
+                                  w-full aspect-square p-3 rounded-lg border-2 text-sm font-medium transition-all
+                                  flex items-center justify-center text-center
+                                  ${isSelected 
+                                    ? 'bg-[#22C55E] text-white border-[#16A34A] shadow-md hover:bg-[#16A34A]' 
+                                    : isAvailable && canSelect
+                                      ? 'bg-white text-gray-700 border-gray-300 hover:border-[#22C55E] hover:bg-green-50 cursor-pointer'
+                                      : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-50'
+                                  }
+                                `}
+                              >
+                                {horaFormateada}
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {selectedBlocks.length > 0 && (
+                          <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+                            <p className="text-sm text-green-800">
+                              <strong>Horario seleccionado:</strong>{' '}
+                              {(() => {
+                                const sorted = [...selectedBlocks].sort((a, b) => a - b)
+                                const inicio = sorted[0] + 7
+                                const fin = sorted[sorted.length - 1] + 8
+                                const inicioFormato = inicio === 12 
+                                  ? '12:00 PM' 
+                                  : inicio > 12 
+                                    ? `${inicio - 12}:00 PM`
+                                    : `${inicio}:00 AM`
+                                const finFormato = fin === 12 
+                                  ? '12:00 PM' 
+                                  : fin > 12 
+                                    ? `${fin - 12}:00 PM`
+                                    : `${fin}:00 AM`
+                                return `${inicioFormato} - ${finFormato} (${sorted.length} hora${sorted.length > 1 ? 's' : ''})`
+                              })()}
                             </p>
                           </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="horaInicio">Hora de Inicio</Label>
-                          <Input
-                            id="horaInicio"
-                            type="time"
-                            {...register('horaInicio')}
-                            disabled={isCreating}
-                            defaultValue={nextSlot.horaInicio}
-                          />
+                        )}
                           {errors.horaInicio && (
                             <p className="text-sm text-red-600">{errors.horaInicio.message}</p>
                           )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor="horaFin">Hora de Fin</Label>
-                          <Input
-                            id="horaFin"
-                            type="time"
-                            {...register('horaFin')}
-                            disabled={isCreating}
-                            defaultValue={nextSlot.horaFin}
-                          />
                           {errors.horaFin && (
                             <p className="text-sm text-red-600">{errors.horaFin.message}</p>
                           )}
-                        </div>
+                        <p className="text-xs text-gray-500">
+                          Los bloques disponibles están en verde. Selecciona máximo 2 bloques consecutivos.
+                        </p>
                       </div>
 
                           <div className="bg-gray-50 p-3 rounded-lg">
@@ -440,6 +640,9 @@ export default function RoomDetailPage() {
                             </p>
                             <p className="text-xs text-gray-500">
                               Las reservas son automáticamente para el día de hoy
+                            </p>
+                            <p className="text-xs text-amber-600 mt-2 font-medium">
+                              ⚠️ Selecciona máximo 2 bloques consecutivos (2 horas) | Una matrícula no puede tener más de una reserva activa al mismo tiempo
                             </p>
                           </div>
 
@@ -469,7 +672,7 @@ export default function RoomDetailPage() {
               <CardHeader className="bg-gray-50 rounded-t-lg">
                 <CardTitle className="text-black">Reservas del Cubículo</CardTitle>
                 <CardDescription>
-                  Reservas activas para este cubículo
+                  Reservas activas y futuras para este cubículo
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
@@ -495,16 +698,53 @@ export default function RoomDetailPage() {
                             <p className="font-medium text-black">
                               {formatDate(reservation.inicio)} - {formatDate(reservation.fin)}
                             </p>
-                            <p className="text-sm text-gray-600">
-                              Matrícula: {(reservation as any).matricula || 'N/A'}
-                            </p>
-                            <p className="text-sm text-gray-600">
-                              Personas: {(reservation as any).cantidadPersonas || 1}
-                            </p>
                           </div>
                         </div>
-                        <Badge variant="secondary" className="bg-[#FFF4B3] text-[#E6B800]">
-                          {reservation.status}
+                        <Badge 
+                          variant="secondary" 
+                          className={
+                            (() => {
+                              const now = new Date()
+                              const inicio = new Date(reservation.inicio)
+                              const fin = new Date(reservation.fin)
+                              
+                              // Si es realmente activa (en su horario)
+                              if (reservation.status === 'active' && now >= inicio && now <= fin) {
+                                return 'bg-[#DCFCE7] text-[#16A34A]' // Verde para activa
+                              }
+                              // Si es pendiente (futura)
+                              if (inicio > now) {
+                                return 'bg-[#FEF3C7] text-[#D97706]' // Amarillo para pendiente
+                              }
+                              // Si está cancelada
+                              if (reservation.status === 'cancelled') {
+                                return 'bg-[#FEE2E2] text-[#DC2626]' // Rojo para cancelada
+                              }
+                              // Si está completada (ya pasó)
+                              return 'bg-[#E0E7FF] text-[#4F46E5]' // Azul para completada
+                            })()
+                          }
+                        >
+                          {(() => {
+                            const now = new Date()
+                            const inicio = new Date(reservation.inicio)
+                            
+                            if (reservation.status === 'active') {
+                              // Verificar si está realmente activa o es futura
+                              if (inicio > now) {
+                                return 'Pendiente'
+                              }
+                              return 'Activa'
+                            }
+                            if (reservation.status === 'cancelled') {
+                              return 'Cancelada'
+                            }
+                            // Si es "completed" pero la fecha es futura, mostrar "Pendiente"
+                            if (inicio > now) {
+                              return 'Pendiente'
+                            }
+                            return 'Completada'
+                          })()}
                         </Badge>
                       </div>
                     ))}

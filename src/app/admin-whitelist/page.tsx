@@ -49,6 +49,9 @@ export default function WhitelistPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [minMatricula, setMinMatricula] = useState<string>('')
+  const [maxMatricula, setMaxMatricula] = useState<string>('')
+  const [selectedStudents, setSelectedStudents] = useState<number[]>([])
   const [dryRunResult, setDryRunResult] = useState<ProcessFileResult | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
@@ -273,10 +276,118 @@ export default function WhitelistPage() {
     }
   }
 
-  const filteredStudents = students.filter(student =>
-    student.matricula.toString().includes(searchTerm) ||
-    student.nombre_abr?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  const filteredStudents = students.filter(student => {
+    // Filtro por búsqueda de texto
+    const matchesSearch = searchTerm === '' || 
+      student.matricula.toString().includes(searchTerm) ||
+      student.nombre_abr?.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    // Filtro por matrícula mínima
+    const matchesMinMatricula = minMatricula === '' || 
+      (minMatricula !== '' && !isNaN(parseInt(minMatricula)) && student.matricula >= parseInt(minMatricula))
+    
+    // Filtro por matrícula máxima
+    const matchesMaxMatricula = maxMatricula === '' || 
+      (maxMatricula !== '' && !isNaN(parseInt(maxMatricula)) && student.matricula <= parseInt(maxMatricula))
+    
+    return matchesSearch && matchesMinMatricula && matchesMaxMatricula
+  })
+
+  const handleToggleStudent = (matricula: number) => {
+    setSelectedStudents(prev => 
+      prev.includes(matricula)
+        ? prev.filter(m => m !== matricula)
+        : [...prev, matricula]
+    )
+  }
+
+  const handleSelectAll = () => {
+    if (selectedStudents.length === filteredStudents.length) {
+      setSelectedStudents([])
+    } else {
+      setSelectedStudents(filteredStudents.map(s => s.matricula))
+    }
+  }
+
+  const handleToggleAllSelected = async (activo: boolean) => {
+    if (selectedStudents.length === 0) {
+      toast.error('No hay estudiantes seleccionados')
+      return
+    }
+
+    try {
+      const { toggleStudentActive } = await import('@/lib/students')
+      let successCount = 0
+      let errorCount = 0
+
+      for (const matricula of selectedStudents) {
+        try {
+          await toggleStudentActive(matricula, activo)
+          successCount++
+        } catch (error) {
+          console.error(`Error actualizando estudiante ${matricula}:`, error)
+          errorCount++
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`${successCount} estudiante(s) ${activo ? 'activado(s)' : 'desactivado(s)'} exitosamente`)
+      }
+      if (errorCount > 0) {
+        toast.error(`Error al actualizar ${errorCount} estudiante(s)`)
+      }
+
+      setSelectedStudents([])
+      loadStudents()
+    } catch (error) {
+      toast.error('Error al actualizar los estudiantes')
+    }
+  }
+
+  const handleDeleteSelected = async () => {
+    if (selectedStudents.length === 0) {
+      toast.error('No hay estudiantes seleccionados')
+      return
+    }
+
+    if (!confirm(`¿Estás seguro de que deseas eliminar ${selectedStudents.length} estudiante(s)? Esta acción no se puede deshacer.`)) {
+      return
+    }
+
+    try {
+      let successCount = 0
+      let errorCount = 0
+
+      for (const matricula of selectedStudents) {
+        try {
+          const response = await fetch(`/api/students?matricula=${matricula}`, {
+            method: 'DELETE',
+          })
+
+          if (!response.ok) {
+            throw new Error('Error al eliminar el estudiante')
+          }
+
+          successCount++
+        } catch (error) {
+          console.error(`Error eliminando estudiante ${matricula}:`, error)
+          errorCount++
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`${successCount} estudiante(s) eliminado(s) exitosamente`)
+      }
+      if (errorCount > 0) {
+        toast.error(`Error al eliminar ${errorCount} estudiante(s)`)
+      }
+
+      setSelectedStudents([])
+      loadStudents()
+    } catch (error) {
+      toast.error('Error al eliminar los estudiantes')
+    }
+  }
 
   const activeStudents = filteredStudents.filter(s => s.activo)
   const inactiveStudents = filteredStudents.filter(s => !s.activo)
@@ -376,20 +487,72 @@ export default function WhitelistPage() {
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-8">
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <div className="flex flex-col gap-4 mb-8">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Buscar por matrícula o nombre..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            <div className="w-full sm:w-48">
               <Input
-                placeholder="Buscar por matrícula o nombre..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                type="number"
+                placeholder="Matrícula mínima"
+                value={minMatricula}
+                onChange={(e) => setMinMatricula(e.target.value)}
+              />
+            </div>
+            <div className="w-full sm:w-48">
+              <Input
+                type="number"
+                placeholder="Matrícula máxima"
+                value={maxMatricula}
+                onChange={(e) => setMaxMatricula(e.target.value)}
               />
             </div>
           </div>
-          <div className="flex gap-2">
-            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <div className="flex flex-wrap gap-2 items-center">
+            {selectedStudents.length > 0 && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => handleToggleAllSelected(true)}
+                  className="border-green-500 text-green-500 hover:bg-green-500 hover:text-white"
+                >
+                  Activar ({selectedStudents.length})
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleToggleAllSelected(false)}
+                  className="border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
+                >
+                  Desactivar ({selectedStudents.length})
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleDeleteSelected}
+                  className="border-red-600 text-red-600 hover:bg-red-600 hover:text-white"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Eliminar ({selectedStudents.length})
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedStudents([])}
+                  className="border-gray-500 text-gray-500 hover:bg-gray-500 hover:text-white"
+                >
+                  Limpiar selección
+                </Button>
+              </>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="bg-[#FFCD00] hover:bg-[#E6B800] text-black">
                   <Plus className="h-4 w-4 mr-2" />
@@ -522,10 +685,11 @@ export default function WhitelistPage() {
               </DialogContent>
             </Dialog>
 
-            <Button variant="outline" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-2" />
-              Exportar CSV
-            </Button>
+              <Button variant="outline" onClick={handleExport}>
+                <Download className="h-4 w-4 mr-2" />
+                Exportar CSV
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -775,6 +939,14 @@ export default function WhitelistPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-12">
+                        <input
+                          type="checkbox"
+                          checked={selectedStudents.length === filteredStudents.length && filteredStudents.length > 0}
+                          onChange={handleSelectAll}
+                          className="w-4 h-4 text-[#22C55E] bg-gray-100 border-gray-300 rounded focus:ring-[#22C55E] focus:ring-2 cursor-pointer"
+                        />
+                      </TableHead>
                       <TableHead>Matrícula</TableHead>
                       <TableHead>Nombre</TableHead>
                       <TableHead>Nivel</TableHead>
@@ -787,6 +959,14 @@ export default function WhitelistPage() {
                   <TableBody>
                     {filteredStudents.map((student) => (
                       <TableRow key={student.matricula}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={selectedStudents.includes(student.matricula)}
+                            onChange={() => handleToggleStudent(student.matricula)}
+                            className="w-4 h-4 text-[#22C55E] bg-gray-100 border-gray-300 rounded focus:ring-[#22C55E] focus:ring-2 cursor-pointer"
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">
                           {student.matricula}
                         </TableCell>

@@ -104,7 +104,7 @@ export const AvailabilityQuerySchema = z.object({
 // Reservation rules
 export const RESERVATION_RULES = {
   MIN_DURATION_MINUTES: 30,
-  MAX_DURATION_MINUTES: 240, // 4 hours
+  MAX_DURATION_MINUTES: 120, // 2 hours (máximo permitido)
   MAX_ADVANCE_DAYS: 7,
   MAX_RESERVATIONS_PER_DAY: 2,
   MAX_RESERVATIONS_PER_WEEK: 5,

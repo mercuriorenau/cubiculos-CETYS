@@ -10,6 +10,7 @@ import {
   cancelReservation as cancelCubiculosReservation,
   updateReservation as updateCubiculosReservation,
   checkReservationConflicts as checkCubiculosConflicts,
+  checkMatriculaConflicts as checkCubiculosMatriculaConflicts,
   getRoomById as getCubiculosRoomById,
   type Reservation as CubiculosReservation,
   type Room as CubiculosRoom
@@ -100,9 +101,19 @@ export async function getReservations(
   endDate?: Date
 ): Promise<Reservation[]> {
   // Usar el sistema de cubículos con localStorage
-  const cubiculosReservations = getCubiculosReservations()
+  // Usar getAllReservations para obtener todas las reservas (activas, futuras, completadas)
+  // y luego filtrar según lo que necesitemos
+  const allCubiculosReservations = getAllCubiculosReservations()
+  const now = new Date()
   
-  let filteredReservations = cubiculosReservations.filter(r => r.status === 'active')
+  // Incluir reservas activas y reservas futuras (pendientes)
+  let filteredReservations = allCubiculosReservations.filter(r => {
+    if (r.status === 'cancelled') return false
+    // Incluir activas o futuras
+    const isActive = r.status === 'active'
+    const isFuture = new Date(r.inicio) > now
+    return isActive || isFuture
+  })
   
   // Filtrar por roomId si se proporciona
   if (roomId) {
@@ -119,7 +130,7 @@ export async function getReservations(
   }
   
   // Convertir CubiculosReservation a Reservation para mantener compatibilidad
-  return filteredReservations.map(reservation => ({
+  const reservations = filteredReservations.map(reservation => ({
     id: reservation.id,
     user_id: '',
     room_id: reservation.room_id,
@@ -137,6 +148,13 @@ export async function getReservations(
       capacidad: getCubiculos().find(r => r.id === reservation.room_id)?.capacidad || 1
     }
   }))
+  
+  // Ordenar por fecha de creación descendente (más recientes primero)
+  return reservations.sort((a, b) => {
+    const dateA = new Date(a.created_at).getTime()
+    const dateB = new Date(b.created_at).getTime()
+    return dateB - dateA // Orden descendente
+  })
 }
 
 export async function getUserReservations(): Promise<Reservation[]> {
@@ -144,7 +162,7 @@ export async function getUserReservations(): Promise<Reservation[]> {
   const cubiculosReservations = getCubiculosUserReservations()
   
   // Convertir CubiculosReservation a Reservation para mantener compatibilidad
-  return cubiculosReservations.map(reservation => ({
+  const reservations = cubiculosReservations.map(reservation => ({
     id: reservation.id,
     user_id: '', // No necesario en el sistema simplificado
     room_id: reservation.room_id,
@@ -162,6 +180,13 @@ export async function getUserReservations(): Promise<Reservation[]> {
       capacidad: getCubiculos().find(r => r.id === reservation.room_id)?.capacidad || 1
     }
   }))
+  
+  // Ordenar por fecha de creación descendente (más recientes primero)
+  return reservations.sort((a, b) => {
+    const dateA = new Date(a.created_at).getTime()
+    const dateB = new Date(b.created_at).getTime()
+    return dateB - dateA // Orden descendente
+  })
 }
 
 export async function createReservation(
@@ -178,10 +203,17 @@ export async function createReservation(
     throw new Error(validation.message!)
   }
 
-  // Check for conflicts
-  const conflicts = checkCubiculosConflicts(roomId, inicio, fin)
-  if (conflicts.length > 0) {
-    throw new Error('Ya existe una reserva en ese horario')
+  // Check for conflicts in the room
+  const roomConflicts = checkCubiculosConflicts(roomId, inicio, fin)
+  if (roomConflicts.length > 0) {
+    throw new Error('Ya existe una reserva en ese horario para este cubículo')
+  }
+
+  // Check for conflicts with the same matrícula (no puede tener más de una reserva activa al mismo tiempo)
+  const matriculaConflicts = checkCubiculosMatriculaConflicts(matricula, inicio, fin)
+  if (matriculaConflicts.length > 0) {
+    const conflictRoom = getCubiculos().find(r => r.id === matriculaConflicts[0].room_id)
+    throw new Error(`Ya tienes una reserva activa en el mismo horario (${conflictRoom?.nombre || 'otro cubículo'})`)
   }
 
   // Crear reserva usando el sistema de cubículos
@@ -289,15 +321,54 @@ export async function checkReservationConflicts(
   }))
 }
 
+// Función para verificar si una matrícula ya tiene una reserva activa en el mismo horario
+export async function checkMatriculaConflicts(
+  matricula: string,
+  inicio: string,
+  fin: string,
+  excludeReservationId?: string
+): Promise<Reservation[]> {
+  // Usar el sistema de cubículos
+  const cubiculosConflicts = checkCubiculosMatriculaConflicts(matricula, inicio, fin, excludeReservationId)
+  
+  // Convertir a formato Reservation para mantener compatibilidad
+  return cubiculosConflicts.map(reservation => ({
+    id: reservation.id,
+    user_id: '',
+    room_id: reservation.room_id,
+    inicio: reservation.inicio,
+    fin: reservation.fin,
+    status: reservation.status as 'active' | 'cancelled' | 'completed',
+    created_at: reservation.created_at,
+    updated_at: reservation.created_at,
+    matricula: reservation.matricula,
+    nombreCompleto: reservation.nombreCompleto,
+    cantidadPersonas: reservation.cantidadPersonas,
+    room: {
+      id: reservation.room_id,
+      nombre: getCubiculos().find(r => r.id === reservation.room_id)?.nombre || 'Cubículo',
+      capacidad: getCubiculos().find(r => r.id === reservation.room_id)?.capacidad || 1
+    }
+  }))
+}
+
 export function validateReservationRules(inicio: string, fin: string): { valid: boolean; message?: string } {
   const start = new Date(inicio)
   const end = new Date(fin)
   const now = new Date()
 
-  // Check if start time is in the future
-  if (start <= now) {
+  // Permitir reservar en el bloque actual si aún no ha pasado completamente
+  // Comparar solo horas (sin minutos/segundos) para permitir reservar en el bloque actual
+  const startHour = start.getHours()
+  const nowHour = now.getHours()
+  
+  // Si la hora de inicio es menor que la hora actual, rechazar
+  if (startHour < nowHour) {
     return { valid: false, message: 'La reserva debe ser para el futuro' }
   }
+  
+  // Si es la misma hora, permitir (aún se puede reservar para ese bloque)
+  // Si la hora de inicio es mayor, permitir (es futuro)
 
   // Check duration
   const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60)
@@ -306,7 +377,8 @@ export function validateReservationRules(inicio: string, fin: string): { valid: 
   }
 
   if (durationMinutes > RESERVATION_RULES.MAX_DURATION_MINUTES) {
-    return { valid: false, message: `La duración máxima es ${RESERVATION_RULES.MAX_DURATION_MINUTES} minutos` }
+    const maxHours = RESERVATION_RULES.MAX_DURATION_MINUTES / 60
+    return { valid: false, message: `La duración máxima es ${maxHours} hora${maxHours > 1 ? 's' : ''} (${RESERVATION_RULES.MAX_DURATION_MINUTES} minutos)` }
   }
 
   // Check advance booking
@@ -315,8 +387,7 @@ export function validateReservationRules(inicio: string, fin: string): { valid: 
     return { valid: false, message: `Solo se pueden hacer reservas con ${RESERVATION_RULES.MAX_ADVANCE_DAYS} días de anticipación` }
   }
 
-  // Check library hours
-  const startHour = start.getHours()
+  // Check library hours (reutilizar startHour que ya está definido arriba)
   const endHour = end.getHours()
   const openHour = parseInt(RESERVATION_RULES.LIBRARY_HOURS.OPEN.split(':')[0])
   const closeHour = parseInt(RESERVATION_RULES.LIBRARY_HOURS.CLOSE.split(':')[0])

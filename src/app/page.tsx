@@ -89,6 +89,13 @@ export default function StudentView() {
     }
 
     loadData()
+    
+    // Actualizar estados de reservas cada minuto
+    const interval = setInterval(() => {
+      loadData()
+    }, 60000) // 60 segundos
+    
+    return () => clearInterval(interval)
   }, [])
 
   const getRoomAvailability = (roomId: string) => {
@@ -255,7 +262,7 @@ export default function StudentView() {
           <CardHeader className="bg-gray-50 rounded-t-lg">
             <CardTitle className="text-xl font-semibold text-black">Cubículos de Estudio</CardTitle>
             <CardDescription className="text-gray-600">
-              Haz clic en un cubículo disponible para hacer una reserva
+              Haz clic en un cubículo para hacer una reserva. Los cubículos ocupados permiten reservar después de que termine la reserva actual.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-6">
@@ -270,9 +277,9 @@ export default function StudentView() {
                     className={`p-4 border-2 rounded-xl transition-all duration-200 hover:shadow-md ${
                       isAvailable 
                         ? 'border-[#22C55E] bg-gradient-to-br from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 cursor-pointer' 
-                        : 'border-[#EF4444] bg-gradient-to-br from-red-50 to-red-100 hover:from-red-100 hover:to-red-200 cursor-not-allowed opacity-75'
+                        : 'border-[#EF4444] bg-gradient-to-br from-red-50 to-red-100 hover:from-red-100 hover:to-red-200 cursor-pointer opacity-90'
                     } ${isLargeRoom ? 'md:col-span-2' : ''}`}
-                    onClick={() => isAvailable ? router.push(`/rooms/${room.id}`) : null}
+                    onClick={() => router.push(`/rooms/${room.id}`)}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="font-semibold text-black text-lg">{room.nombre}</h3>
