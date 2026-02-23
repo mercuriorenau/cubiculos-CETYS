@@ -143,6 +143,32 @@ La aplicación es completamente instalable como PWA:
 - **Android**: Abre en Chrome → Menú → "Agregar a pantalla de inicio"
 - **iOS**: Abre en Safari → Compartir → "Agregar a pantalla de inicio"
 
+## 📧 Servicio de Correo Electrónico
+
+Este proyecto utiliza el **servicio de correo integrado de Supabase Auth** para el envío de correos transaccionales. No se requiere ningún proveedor externo adicional.
+
+### Correos enviados automáticamente
+
+- **Verificación de cuenta**: Al registrarse, Supabase envía un correo para confirmar el email del usuario.
+- **Restablecimiento de contraseña**: Al solicitar recuperar la contraseña, Supabase envía un enlace de reset al correo del usuario.
+
+### Configuración por defecto
+
+En la versión gratuita de Supabase, los correos se envían mediante el servidor SMTP de Supabase (límite de 3 correos/hora en desarrollo local). Para producción se recomienda configurar un proveedor SMTP personalizado.
+
+### Configurar SMTP personalizado (Producción)
+
+1. Ve a tu proyecto en [Supabase Dashboard](https://supabase.com/dashboard)
+2. Navega a **Authentication** → **Settings** → **SMTP Settings**
+3. Habilita un servidor SMTP propio (por ejemplo: SendGrid, Mailgun, Resend, etc.)
+4. Configura el host, puerto, usuario y contraseña de tu proveedor
+
+### Variables de entorno relacionadas
+
+No se requieren variables de entorno adicionales para el correo; Supabase lo gestiona internamente usando `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+
+---
+
 ## 🔐 Autenticación
 
 ### Estudiantes
